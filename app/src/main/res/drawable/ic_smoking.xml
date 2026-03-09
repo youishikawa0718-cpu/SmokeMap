@@ -1,0 +1,28 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- タバコ本体 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M2,16 L2,19 L18,19 L18,16 Z" />
+    <!-- フィルター -->
+    <path
+        android:fillColor="#FF8A65"
+        android:pathData="M15,16 L18,19 L18,16 Z
+                          M15,16 L15,19 L18,19 L18,16 Z" />
+    <!-- 煙 -->
+    <path
+        android:fillColor="#90A4AE"
+        android:strokeWidth="0"
+        android:pathData="M20,10 C20,8 21,7 21,5 C21,3.5 20,2 18.5,2
+                          C18.5,2 19,3.5 19,5 C19,7 18,8 18,10
+                          C18,12 19,13 19,13 C19,13 20,12 20,10 Z" />
+    <path
+        android:fillColor="#90A4AE"
+        android:strokeWidth="0"
+        android:pathData="M23,10 C23,8 24,7 24,5 C24,3.5 23,2 21.5,2
+                          C21.5,2 22,3.5 22,5 C22,7 21,8 21,10
+                          C21,12 22,13 22,13 C22,13 23,12 23,10 Z" />
+</vector>
