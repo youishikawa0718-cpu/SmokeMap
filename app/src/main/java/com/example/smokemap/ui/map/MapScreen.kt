@@ -7,6 +7,8 @@ import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,7 +26,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
@@ -37,6 +38,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.FloatingActionButton
@@ -90,8 +92,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun MapScreen(
     onSpotClick: (String) -> Unit = {},
-    onAddSpotClick: () -> Unit = {},
-    onFavoritesClick: () -> Unit = {},
+onFavoritesClick: () -> Unit = {},
     viewModel: MapViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -101,6 +102,7 @@ fun MapScreen(
 
     val defaultLat = 33.5902
     val defaultLng = 130.4207
+    var permissionDenied by remember { mutableStateOf(false) }
 
     val fusedLocationClient = remember {
         LocationServices.getFusedLocationProviderClient(context)
@@ -113,6 +115,7 @@ fun MapScreen(
         val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
 
         if (fineGranted || coarseGranted) {
+            permissionDenied = false
             fusedLocationClient.lastLocation.addOnSuccessListener { lastLocation ->
                 if (lastLocation != null) {
                     Log.d("SmokeMap", "lastLocation: ${lastLocation.latitude}, ${lastLocation.longitude}")
@@ -135,10 +138,11 @@ fun MapScreen(
                 viewModel.onLocationResolved(defaultLat, defaultLng)
             }
         } else {
+            permissionDenied = true
             viewModel.onLocationResolved(defaultLat, defaultLng)
             scope.launch {
                 snackbarHostState.showSnackbar(
-                    message = "位置情報が許可されていないため、博多駅付近を表示しています",
+                    message = "位置情報が許可されていません。検索バーから場所を指定できます。",
                     actionLabel = "OK"
                 )
             }
@@ -158,7 +162,18 @@ fun MapScreen(
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let { error ->
-            snackbarHostState.showSnackbar(error)
+            val result = snackbarHostState.showSnackbar(
+                message = error,
+                actionLabel = if (uiState.isOfflineData) "OK" else "再試行",
+                withDismissAction = true
+            )
+            when (result) {
+                androidx.compose.material3.SnackbarResult.ActionPerformed -> {
+                    if (!uiState.isOfflineData) viewModel.retry()
+                }
+                androidx.compose.material3.SnackbarResult.Dismissed -> {}
+            }
+            viewModel.clearError()
         }
     }
 
@@ -201,7 +216,7 @@ fun MapScreen(
                 OutlinedTextField(
                     value = uiState.searchQuery,
                     onValueChange = { viewModel.onSearchQueryChanged(it) },
-                    placeholder = { Text("住所・場所を検索") },
+                    placeholder = { Text("スポット名・住所を検索") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(
@@ -242,7 +257,9 @@ fun MapScreen(
         },
         sheetPeekHeight = if (uiState.selectedSpot != null) 200.dp else 0.dp
     ) { innerPadding ->
-        Box(
+        PullToRefreshBox(
+            isRefreshing = uiState.isLoading,
+            onRefresh = { viewModel.retry() },
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
@@ -251,6 +268,8 @@ fun MapScreen(
                 // リストビュー
                 SpotListView(
                     spots = uiState.filteredSpots,
+                    sortOption = uiState.sortOption,
+                    onSortChanged = { viewModel.updateSortOption(it) },
                     onSpotClick = { viewModel.selectSpot(it) }
                 )
             } else {
@@ -313,6 +332,24 @@ fun MapScreen(
                     .align(Alignment.TopCenter)
                     .padding(top = 8.dp)
             ) {
+                if (permissionDenied) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        )
+                    ) {
+                        Text(
+                            text = "位置情報が許可されていません。上の検索バーから場所を検索して喫煙所を探せます。",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(12.dp),
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
                 // 検索半径
                 RadiusChips(
                     selectedRadius = uiState.searchRadiusM,
@@ -338,12 +375,7 @@ fun MapScreen(
                 ) {
                     Icon(Icons.Default.Favorite, contentDescription = "お気に入り")
                 }
-                SmallFloatingActionButton(
-                    onClick = { onAddSpotClick() }
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "スポット追加")
-                }
-                FloatingActionButton(
+FloatingActionButton(
                     onClick = { viewModel.toggleListView() }
                 ) {
                     Icon(
@@ -359,14 +391,30 @@ fun MapScreen(
                 )
             }
 
-            if (!uiState.isLoading && uiState.filteredSpots.isEmpty() && uiState.error == null) {
-                AssistChip(
-                    onClick = { viewModel.updateRadius(uiState.searchRadiusM + 500) },
-                    label = { Text("この付近に喫煙所が見つかりません。範囲を広げる") },
+            if (!uiState.isLoading && uiState.filteredSpots.isEmpty()) {
+                Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = 80.dp)
-                )
+                        .padding(bottom = 80.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (uiState.error != null && uiState.spots.isEmpty()) {
+                        Text(
+                            text = "データを取得できませんでした",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Button(onClick = { viewModel.retry() }) {
+                            Text("再試行")
+                        }
+                    } else {
+                        AssistChip(
+                            onClick = { viewModel.updateRadius(uiState.searchRadiusM + 500) },
+                            label = { Text("この付近に喫煙所が見つかりません。範囲を広げる") }
+                        )
+                    }
+                }
             }
         }
     }
@@ -424,6 +472,8 @@ fun CategoryChips(
 @Composable
 fun SpotListView(
     spots: List<Spot>,
+    sortOption: SortOption,
+    onSortChanged: (SortOption) -> Unit,
     onSpotClick: (Spot) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -433,6 +483,19 @@ fun SpotListView(
             .padding(top = 100.dp, start = 16.dp, end = 16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        item {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SortOption.entries.forEach { option ->
+                    FilterChip(
+                        selected = sortOption == option,
+                        onClick = { onSortChanged(option) },
+                        label = { Text(option.displayName) }
+                    )
+                }
+            }
+        }
         items(spots, key = { it.id }) { spot ->
             Card(
                 onClick = { onSpotClick(spot) },
@@ -463,6 +526,13 @@ fun SpotListView(
                                             "${"%.1f".format(spot.distanceMeters / 1000)}km"
                                     )
                                 }
+                            )
+                        }
+                        if ((spot.avgRating ?: 0.0) > 0) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            AssistChip(
+                                onClick = {},
+                                label = { Text("★ ${"%.1f".format(spot.avgRating ?: 0.0)}") }
                             )
                         }
                     }

@@ -3,7 +3,8 @@ package com.example.smokemap.data.repository
 import android.content.Context
 import com.example.smokemap.data.local.DatabaseProvider
 import com.example.smokemap.data.local.SpotEntity
-import com.example.smokemap.data.remote.CreateSpotRequest
+import com.example.smokemap.data.remote.CreateReviewRequest
+import com.example.smokemap.data.remote.CreateSpotReportRequest
 import com.example.smokemap.data.remote.NearbyRequest
 import com.example.smokemap.data.remote.NearbySpotDto
 import com.example.smokemap.data.remote.ReviewDto
@@ -13,6 +14,12 @@ import com.example.smokemap.domain.model.Review
 import com.example.smokemap.domain.model.Spot
 import com.example.smokemap.domain.model.SpotCategory
 import com.example.smokemap.domain.model.SpotStatus
+import retrofit2.HttpException
+
+data class SpotsResult(
+    val spots: List<Spot>,
+    val isOffline: Boolean = false
+)
 
 class SpotRepository(private val context: Context? = null) {
 
@@ -45,7 +52,7 @@ class SpotRepository(private val context: Context? = null) {
         lat: Double,
         lng: Double,
         radiusM: Int = 500
-    ): Result<List<Spot>> {
+    ): Result<SpotsResult> {
         return try {
             val request = NearbyRequest(lat = lat, lng = lng, radiusM = radiusM)
             val response = api.getNearbySpots(apiKey = apiKey, request = request)
@@ -53,11 +60,11 @@ class SpotRepository(private val context: Context? = null) {
             spotDao?.let { dao ->
                 dao.insertAll(spots.map { it.toEntity() })
             }
-            Result.success(spots)
+            Result.success(SpotsResult(spots, isOffline = false))
         } catch (e: Exception) {
             val cached = spotDao?.getAllSpots()
             if (!cached.isNullOrEmpty()) {
-                Result.success(cached.map { it.toDomain() })
+                Result.success(SpotsResult(cached.map { it.toDomain() }, isOffline = true))
             } else {
                 Result.failure(e)
             }
@@ -90,29 +97,69 @@ class SpotRepository(private val context: Context? = null) {
         }
     }
 
-    suspend fun createSpot(
-        name: String,
-        latitude: Double,
-        longitude: Double,
-        category: SpotCategory,
-        description: String?
-    ): Result<Spot> {
+suspend fun createReview(
+        spotId: String,
+        rating: Int,
+        comment: String?,
+        deviceId: String
+    ): Result<Review> {
         return try {
-            val request = CreateSpotRequest(
-                name = name,
-                latitude = latitude,
-                longitude = longitude,
-                category = category.name.lowercase(),
-                description = description
+            val request = CreateReviewRequest(
+                spotId = spotId,
+                userId = deviceId,
+                rating = rating,
+                comment = comment
             )
-            val response = api.createSpot(
+            val response = api.createReview(
                 apiKey = apiKey,
                 auth = "Bearer $apiKey",
-                spot = request
+                review = request
             )
             val dto = response.firstOrNull()
-                ?: return Result.failure(Exception("登録に失敗しました"))
+                ?: return Result.failure(Exception("投稿に失敗しました"))
             Result.success(dto.toDomain())
+        } catch (e: HttpException) {
+            val errorBody = e.response()?.errorBody()?.string()
+            android.util.Log.e("SpotRepository", "createReview HTTP ${e.code()}: $errorBody")
+            Result.failure(Exception("HTTP ${e.code()}: ${errorBody ?: e.message()}"))
+        } catch (e: Exception) {
+            android.util.Log.e("SpotRepository", "createReview error", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteReview(reviewId: String, deviceId: String): Result<Unit> {
+        return try {
+            api.deleteReview(
+                apiKey = apiKey,
+                auth = "Bearer $apiKey",
+                id = "eq.$reviewId",
+                userId = "eq.$deviceId"
+            )
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun reportSpot(
+        spotId: String,
+        deviceId: String,
+        reason: String,
+        comment: String?
+    ): Result<Unit> {
+        return try {
+            api.createSpotReport(
+                apiKey = apiKey,
+                auth = "Bearer $apiKey",
+                report = CreateSpotReportRequest(
+                    spotId = spotId,
+                    userId = deviceId,
+                    reason = reason,
+                    comment = comment
+                )
+            )
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }

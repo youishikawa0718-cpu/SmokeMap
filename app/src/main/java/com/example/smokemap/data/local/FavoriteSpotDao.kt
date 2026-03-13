@@ -20,3 +20,4 @@ interface FavoriteSpotDao {
     @Query("DELETE FROM favorite_spots WHERE spotId = :spotId")
     suspend fun removeFavorite(spotId: String)
 }
+

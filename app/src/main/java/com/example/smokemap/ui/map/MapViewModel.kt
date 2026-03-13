@@ -15,11 +15,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
+enum class SortOption(val displayName: String) {
+    DISTANCE("距離順"),
+    RATING("評価順")
+}
+
 data class MapUiState(
     val spots: List<Spot> = emptyList(),
     val filteredSpots: List<Spot> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null,
+    val isOfflineData: Boolean = false,
     val selectedSpot: Spot? = null,
     val searchRadiusM: Int = 500,
     val userLat: Double = 33.5902,
@@ -27,7 +33,8 @@ data class MapUiState(
     val locationReady: Boolean = false,
     val selectedCategories: Set<SpotCategory> = SpotCategory.entries.toSet(),
     val isListView: Boolean = false,
-    val searchQuery: String = ""
+    val searchQuery: String = "",
+    val sortOption: SortOption = SortOption.DISTANCE
 )
 
 class MapViewModel(application: Application) : AndroidViewModel(application) {
@@ -44,26 +51,7 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
             userLng = lng,
             locationReady = true
         )
-        loadSpots()
-    }
-
-    fun loadSpots() {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-            val result = repository.getSpots()
-            result.onSuccess { spots ->
-                _uiState.value = _uiState.value.copy(
-                    spots = spots,
-                    filteredSpots = spots.filterByCategory(_uiState.value.selectedCategories),
-                    isLoading = false
-                )
-            }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    error = e.message ?: "読み込みに失敗しました"
-                )
-            }
-        }
+        searchNearby(lat, lng, _uiState.value.searchRadiusM)
     }
 
     fun searchNearby(lat: Double, lng: Double, radiusM: Int = 500) {
@@ -71,24 +59,39 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.value = _uiState.value.copy(
                 isLoading = true,
                 error = null,
+                isOfflineData = false,
                 userLat = lat,
                 userLng = lng,
                 searchRadiusM = radiusM
             )
             val result = repository.getNearbySpots(lat, lng, radiusM)
-            result.onSuccess { spots ->
+            result.onSuccess { spotsResult ->
                 _uiState.value = _uiState.value.copy(
-                    spots = spots,
-                    filteredSpots = spots.filterByCategory(_uiState.value.selectedCategories),
-                    isLoading = false
+                    spots = spotsResult.spots,
+                    filteredSpots = spotsResult.spots.applyFilters(
+                        _uiState.value.selectedCategories,
+                        _uiState.value.searchQuery,
+                        _uiState.value.sortOption
+                    ),
+                    isLoading = false,
+                    isOfflineData = spotsResult.isOffline,
+                    error = if (spotsResult.isOffline) "オフラインのため、キャッシュデータを表示しています" else null
                 )
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    error = e.message ?: "検索に失敗しました"
+                    error = "ネットワークエラー: 接続を確認してください"
                 )
             }
         }
+    }
+
+    fun retry() {
+        searchNearby(_uiState.value.userLat, _uiState.value.userLng, _uiState.value.searchRadiusM)
+    }
+
+    fun clearError() {
+        _uiState.value = _uiState.value.copy(error = null)
     }
 
     fun updateRadius(radiusM: Int) {
@@ -109,7 +112,11 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         }
         _uiState.value = _uiState.value.copy(
             selectedCategories = updated,
-            filteredSpots = _uiState.value.spots.filterByCategory(updated)
+            filteredSpots = _uiState.value.spots.applyFilters(
+                updated,
+                _uiState.value.searchQuery,
+                _uiState.value.sortOption
+            )
         )
     }
 
@@ -122,7 +129,25 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onSearchQueryChanged(query: String) {
-        _uiState.value = _uiState.value.copy(searchQuery = query)
+        _uiState.value = _uiState.value.copy(
+            searchQuery = query,
+            filteredSpots = _uiState.value.spots.applyFilters(
+                _uiState.value.selectedCategories,
+                query,
+                _uiState.value.sortOption
+            )
+        )
+    }
+
+    fun updateSortOption(option: SortOption) {
+        _uiState.value = _uiState.value.copy(
+            sortOption = option,
+            filteredSpots = _uiState.value.spots.applyFilters(
+                _uiState.value.selectedCategories,
+                _uiState.value.searchQuery,
+                option
+            )
+        )
     }
 
     fun searchByAddress() {
@@ -156,7 +181,22 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(userLat = lat, userLng = lng)
     }
 
-    private fun List<Spot>.filterByCategory(categories: Set<SpotCategory>): List<Spot> {
+    private fun List<Spot>.applyFilters(
+        categories: Set<SpotCategory>,
+        query: String = "",
+        sort: SortOption = SortOption.DISTANCE
+    ): List<Spot> {
+        val trimmed = query.trim()
         return filter { it.category in categories }
+            .let { list ->
+                if (trimmed.isEmpty()) list
+                else list.filter { it.name.contains(trimmed, ignoreCase = true) }
+            }
+            .let { list ->
+                when (sort) {
+                    SortOption.DISTANCE -> list.sortedBy { it.distanceMeters ?: Double.MAX_VALUE }
+                    SortOption.RATING -> list.sortedByDescending { it.avgRating ?: 0.0 }
+                }
+            }
     }
 }

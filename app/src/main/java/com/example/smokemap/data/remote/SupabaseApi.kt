@@ -3,6 +3,7 @@ package com.example.smokemap.data.remote
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
@@ -38,13 +39,30 @@ interface SupabaseApi {
         @Query("order") order: String = "created_at.desc"
     ): List<ReviewDto>
 
-    @POST("rest/v1/spots")
-    suspend fun createSpot(
+@POST("rest/v1/reviews")
+    suspend fun createReview(
         @Header("apikey") apiKey: String,
         @Header("Authorization") auth: String,
-        @Header("Prefer") prefer: String = "return=representation",
-        @Body spot: CreateSpotRequest
-    ): List<SpotDto>
+        @Header("Prefer") prefer: String = "return=representation,resolution=merge-duplicates",
+        @Header("Content-Type") contentType: String = "application/json",
+        @Body review: CreateReviewRequest
+    ): List<ReviewDto>
+
+    @DELETE("rest/v1/reviews")
+    suspend fun deleteReview(
+        @Header("apikey") apiKey: String,
+        @Header("Authorization") auth: String,
+        @Query("id") id: String,
+        @Query("user_id") userId: String
+    ): retrofit2.Response<Unit>
+
+    @POST("rest/v1/spot_reports")
+    suspend fun createSpotReport(
+        @Header("apikey") apiKey: String,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "return=minimal",
+        @Body report: CreateSpotReportRequest
+    ): retrofit2.Response<Unit>
 }
 
 // === DTO ===
@@ -94,12 +112,17 @@ data class ReviewDto(
 )
 
 @Serializable
-data class CreateSpotRequest(
-    val name: String,
-    val latitude: Double,
-    val longitude: Double,
-    val category: String,
-    val description: String? = null,
-    val status: String = "pending",
-    @SerialName("created_by") val createdBy: String = "anonymous"
+data class CreateReviewRequest(
+    @SerialName("spot_id") val spotId: String,
+    @SerialName("user_id") val userId: String,
+    val rating: Int,
+    val comment: String? = null
+)
+
+@Serializable
+data class CreateSpotReportRequest(
+    @SerialName("spot_id") val spotId: String,
+    @SerialName("user_id") val userId: String,
+    val reason: String,
+    val comment: String? = null
 )

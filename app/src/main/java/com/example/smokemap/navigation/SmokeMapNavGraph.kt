@@ -6,7 +6,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.example.smokemap.ui.addspot.AddSpotScreen
 import com.example.smokemap.ui.detail.SpotDetailScreen
 import com.example.smokemap.ui.favorites.FavoritesScreen
 import com.example.smokemap.ui.map.MapScreen
@@ -20,9 +19,6 @@ fun SmokeMapNavGraph() {
             MapScreen(
                 onSpotClick = { spotId ->
                     navController.navigate(Screen.spotDetail(spotId))
-                },
-                onAddSpotClick = {
-                    navController.navigate(Screen.ADD_SPOT)
                 },
                 onFavoritesClick = {
                     navController.navigate(Screen.FAVORITES)
@@ -41,13 +37,7 @@ fun SmokeMapNavGraph() {
             )
         }
 
-        composable(Screen.ADD_SPOT) {
-            AddSpotScreen(
-                onBack = { navController.popBackStack() }
-            )
-        }
-
-        composable(Screen.FAVORITES) {
+composable(Screen.FAVORITES) {
             FavoritesScreen(
                 onBack = { navController.popBackStack() },
                 onSpotClick = { spotId ->
